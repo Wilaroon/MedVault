@@ -1,0 +1,32 @@
+
+
+services:
+  # Servidor Base de Datos (PostgreSQL)
+  db:
+    image: postgres:15-alpine
+    container_name: medvault_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgresMV
+      POSTGRES_PASSWORD: wilxroon232324
+      POSTGRES_DB: medvault_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Servidor Backend (FastAPI)
+  backend:
+    build: ./backend       # <--- Le dice a Docker que busque el Dockerfile dentro de la carpeta backend
+    container_name: medvault_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:wilxroon232324@db:5432/medvault_db
+    depends_on:
+      - db                 # Espera a que la base de datos encienda antes de arrancar el backend
+
+volumes:
+  postgres_data:
+  
