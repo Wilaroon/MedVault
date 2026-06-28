@@ -1,5 +1,3 @@
-
-
 services:
   # Servidor Base de Datos (PostgreSQL)
   db:
@@ -17,16 +15,15 @@ services:
 
   # Servidor Backend (FastAPI)
   backend:
-    build: ./backend       # <--- Le dice a Docker que busque el Dockerfile dentro de la carpeta backend
+    build: ./backend       # Le dice a Docker que busque el Dockerfile dentro de la carpeta backend
     container_name: medvault_backend
     restart: always
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:wilxroon232324@db:5432/medvault_db
+      - DATABASE_URL=postgresql://postgresMV:wilxroon232324@medvault_db:5432/medvault_db
     depends_on:
-      - db                 # Espera a que la base de datos encienda antes de arrancar el backend
+      - db                 # 🚨 CORREGIDO: Ahora apunta al servicio correcto ('db')
 
 volumes:
   postgres_data:
-  
