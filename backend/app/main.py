@@ -3,8 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from datetime import date
 from typing import Optional
-from app.database import init_db, get_db_connection
+
 import psycopg2
+import json
+from app.schemas import PacienteCreate
+from app.database import init_db, get_db_connection
+
 
 # 1. Instanciamos FastAPI
 app = FastAPI(title="MedVault API", version="1.0")
@@ -23,39 +27,20 @@ app.add_middleware(
 def startup_event():
     init_db()
 
-class PacienteSchema(BaseModel):
-    nombre_completo: str
-    cedula_id: str
-    fecha_nacimiento: date
-    genero: str
-    telefono_contacto: Optional[str] = None
-    direccion: Optional[str] = None
-    contacto_emergencia_nombre: Optional[str] = None
-    tipo_sangre: Optional[str] = None
-    seguro_medico: Optional[str] = None
-    alergias_conocidas: Optional[str] = None
-    historial_medico: Optional[str] = None
 
-    # 🚨 CORREGIDO: Configuración interna oficial de Pydantic v2
-    model_config = {
-        "populate_by_name": True
-    }
 
 @app.get("/")
 def read_root():
     return {"message": "¡MedVault API operando con tus esquemas originales!"}
 
-
-
-# 🚀 ENDPOINT CORREGIDO CON RESPUESTA EXPLÍCITA
 @app.post("/api/pacientes", status_code=201)
-def crear_paciente(paciente: PacienteSchema):
+def crear_paciente(paciente: PacienteCreate):
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # Query completa con todas las columnas de tu tabla
+        # Query completa con las columnas reales de tu Postgres
         query = """
             INSERT INTO pacientes (
                 nombre_completo, cedula_id, fecha_nacimiento, genero, 
@@ -65,19 +50,24 @@ def crear_paciente(paciente: PacienteSchema):
             RETURNING id;
         """
         
-        # Pasamos absolutamente todos los valores mapeados
+        # 💡 Convertimos las estructuras complejas a texto JSON para la BD si tus columnas son tipo JSON o TEXT
+        contacto_json = json.dumps(paciente.contacto_emergencia) if paciente.contacto_emergencia else None
+        # Mapeamos la lista de objetos de alergia a un string legible o JSON
+        alergias_json = json.dumps([a.model_dump() for a in paciente.alergias]) if paciente.alergias else None
+
+        # Pasamos los valores usando los nombres exactos definidos en app/schemas.py
         cur.execute(query, (
-            paciente.nombre_completo,
-            paciente.cedula_id,
-            paciente.fecha_nacimiento,
-            paciente.genero,
-            paciente.telefono_contacto,
-            paciente.direccion,
-            paciente.contacto_emergencia_nombre,
-            paciente.tipo_sangre,
-            paciente.seguro_medico,
-            paciente.alergias_conocidas,
-            paciente.historial_medico
+            paciente.nombre,               # de "nombre" en el frontend
+            paciente.cedula,               # de "cedula" en el frontend
+            paciente.fecha_nacimiento,     # traducido de "fechaNacimiento"
+            paciente.genero,               # de "genero"
+            paciente.telefono,             # de "telefono"
+            paciente.direccion,            # de "direccion"
+            contacto_json,                 # traducido de "contactoEmergencia"
+            paciente.tipo_sangre,          # traducido de "tipoSangre"
+            paciente.seguro,               # de "seguro"
+            alergias_json,                 # de "alergias"
+            paciente.antecedentes          # de "antecedentes"
         ))
         
         nuevo_id = cur.fetchone()[0]
@@ -90,13 +80,16 @@ def crear_paciente(paciente: PacienteSchema):
             "id": int(nuevo_id)
         }
         
-    except psycopg2.IntegrityError as e:
-        raise HTTPException(status_code=400, detail=f"Error de integridad: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+        # Atrapa errores de duplicados (IntegrityError) u otros problemas
+        if conn:
+            conn.rollback()
+        raise HTTPException(status_code=400, detail=f"Error en la base de datos: {str(e)}")
     finally:
         if conn:
             conn.close()
+
+
 
 # 🔍 ENDPOINT PARA EXTRAER
 @app.get("/api/pacientes")
