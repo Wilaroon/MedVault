@@ -1,13 +1,11 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from datetime import date
-from typing import Optional
+from psycopg2.extras import RealDictCursor, Json
 
-import psycopg2
 import json
 from app.schemas import PacienteCreate
 from app.database import init_db, get_db_connection
+from app.utils import fila_a_paciente_response
 
 
 # 1. Instanciamos FastAPI
@@ -22,16 +20,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # 3. Inicializar la base de datos al arrancar
 @app.on_event("startup")
 def startup_event():
     init_db()
 
 
-
 @app.get("/")
 def read_root():
     return {"message": "¡MedVault API operando con tus esquemas originales!"}
+
 
 @app.post("/api/pacientes", status_code=201)
 def crear_paciente(paciente: PacienteCreate):
@@ -39,49 +38,55 @@ def crear_paciente(paciente: PacienteCreate):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        
-        # Query completa con las columnas reales de tu Postgres
+
+        # Query con las columnas reales de Postgres, incluyendo
+        # email y contacto_emergencia (ahora JSONB)
         query = """
             INSERT INTO pacientes (
-                nombre_completo, cedula_id, fecha_nacimiento, genero, 
-                telefono_contacto, direccion, contacto_emergencia_nombre, 
+                nombre_completo, cedula_id, fecha_nacimiento, genero,
+                telefono_contacto, email, direccion, contacto_emergencia,
                 tipo_sangre, seguro_medico, alergias_conocidas, historial_medico
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id;
         """
-        
-        # 💡 Convertimos las estructuras complejas a texto JSON para la BD si tus columnas son tipo JSON o TEXT
-        contacto_json = json.dumps(paciente.contacto_emergencia) if paciente.contacto_emergencia else None
-        # Mapeamos la lista de objetos de alergia a un string legible o JSON
-        alergias_json = json.dumps([a.model_dump() for a in paciente.alergias]) if paciente.alergias else None
 
-        # Pasamos los valores usando los nombres exactos definidos en app/schemas.py
+        # Json(...) le dice a psycopg2 que serialice el dict/list
+        # directamente como JSONB, sin pasar por json.dumps manual.
+        contacto_data = (
+            paciente.contacto_emergencia.model_dump()
+            if paciente.contacto_emergencia else None
+        )
+        alergias_data = (
+            [a.model_dump() for a in paciente.alergias]
+            if paciente.alergias else []
+        )
+
         cur.execute(query, (
-            paciente.nombre,               # de "nombre" en el frontend
-            paciente.cedula,               # de "cedula" en el frontend
-            paciente.fecha_nacimiento,     # traducido de "fechaNacimiento"
-            paciente.genero,               # de "genero"
-            paciente.telefono,             # de "telefono"
-            paciente.direccion,            # de "direccion"
-            contacto_json,                 # traducido de "contactoEmergencia"
-            paciente.tipo_sangre,          # traducido de "tipoSangre"
-            paciente.seguro,               # de "seguro"
-            alergias_json,                 # de "alergias"
-            paciente.antecedentes          # de "antecedentes"
+            paciente.nombre,
+            paciente.cedula,
+            paciente.fecha_nacimiento,
+            paciente.genero,
+            paciente.telefono,
+            paciente.email,
+            paciente.direccion,
+            Json(contacto_data) if contacto_data else None,
+            paciente.tipo_sangre,
+            paciente.seguro,
+            Json(alergias_data),
+            paciente.antecedentes,
         ))
-        
+
         nuevo_id = cur.fetchone()[0]
         conn.commit()
         cur.close()
-        
+
         return {
             "status": "success",
             "message": "Paciente registrado con éxito",
             "id": int(nuevo_id)
         }
-        
+
     except Exception as e:
-        # Atrapa errores de duplicados (IntegrityError) u otros problemas
         if conn:
             conn.rollback()
         raise HTTPException(status_code=400, detail=f"Error en la base de datos: {str(e)}")
@@ -90,21 +95,24 @@ def crear_paciente(paciente: PacienteCreate):
             conn.close()
 
 
-
-# 🔍 ENDPOINT PARA EXTRAER
+# 🔍 ENDPOINT PARA EXTRAER (formato dashboard)
 @app.get("/api/pacientes")
 def obtener_pacientes():
     conn = None
     try:
         conn = get_db_connection()
-        from psycopg2.extras import RealDictCursor
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        
+
         cur.execute("SELECT * FROM pacientes ORDER BY fecha_registro DESC;")
-        pacientes = cur.fetchall()
-        
+        filas = cur.fetchall()
+
         cur.close()
+
+        # Transformamos cada fila cruda de la BD al objeto que
+        # espera el frontend (name, initials, age, diag, etc.)
+        pacientes = [fila_a_paciente_response(dict(row)) for row in filas]
         return pacientes
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:

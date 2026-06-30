@@ -14,23 +14,23 @@ def get_db_connection():
     retries = 5
     while retries > 0:
         try:
-            # 🚨 Psycopg2 lee la URL con las credenciales actualizadas
             conn = psycopg2.connect(DATABASE_URL)
             return conn
         except psycopg2.OperationalError as e:
             print(f"🔄 Esperando a la base de datos... Reintentos restantes: {retries}")
             retries -= 1
-            time.sleep(2)  # Espera 2 segundos antes de volver a intentar
-            
+            time.sleep(2)
+
     raise Exception("❌ No se pudo conectar a la base de datos PostgreSQL tras varios intentos.")
+
 
 def init_db():
     """
-    Función para crear la tabla de pacientes automáticamente 
-    si no existe al arrancar el servidor.
+    Crea la tabla de pacientes si no existe, y además aplica
+    migraciones idempotentes (ALTER TABLE) para bases de datos
+    que ya existían con el esquema viejo.
     """
-    commands = ("""
-        
+    create_table = """
         CREATE TABLE IF NOT EXISTS pacientes (
             id SERIAL PRIMARY KEY,
             nombre_completo VARCHAR(150) NOT NULL,
@@ -38,27 +38,88 @@ def init_db():
             fecha_nacimiento DATE NOT NULL,
             genero VARCHAR(20),
             telefono_contacto VARCHAR(30),
+            email VARCHAR(150),
             direccion VARCHAR(255),
-            contacto_emergencia_nombre VARCHAR(150),
+            contacto_emergencia JSONB,
             tipo_sangre VARCHAR(15),
             seguro_medico VARCHAR(100),
-            alergias_conocidas TEXT,
+            alergias_conocidas JSONB,
             historial_medico TEXT,
             fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );"""
-        ,
-    )
+        );
+    """
+
+    # Migraciones para bases de datos que ya existían con el
+    # esquema viejo. Cada una es segura de re-ejecutar (idempotente).
+    migrations = [
+        "ALTER TABLE pacientes ADD COLUMN IF NOT EXISTS email VARCHAR(150);",
+        "ALTER TABLE pacientes ADD COLUMN IF NOT EXISTS contacto_emergencia JSONB;",
+        "ALTER TABLE pacientes ALTER COLUMN fecha_registro SET DEFAULT CURRENT_TIMESTAMP;",
+    ]
+
+    # Migraciones "peligrosas" que solo aplican si la columna vieja
+    # todavía existe. Se manejan aparte porque pueden fallar si los
+    # datos no son compatibles (ver nota abajo).
+    conditional_migrations = [
+        # Si existe la columna vieja contacto_emergencia_nombre, la eliminamos
+        # (ya no se usa: ahora todo vive en la columna contacto_emergencia JSONB)
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='pacientes' AND column_name='contacto_emergencia_nombre'
+            ) THEN
+                ALTER TABLE pacientes DROP COLUMN contacto_emergencia_nombre;
+            END IF;
+        END $$;
+        """,
+        # Convertir alergias_conocidas de TEXT a JSONB si todavía es TEXT.
+        # OJO: esto falla si hay filas con texto que no sea JSON válido.
+        # Si falla, revisa esos datos manualmente antes de reintentar.
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='pacientes'
+                  AND column_name='alergias_conocidas'
+                  AND data_type = 'text'
+            ) THEN
+                ALTER TABLE pacientes
+                ALTER COLUMN alergias_conocidas TYPE JSONB
+                USING CASE
+                    WHEN alergias_conocidas IS NULL OR alergias_conocidas = ''
+                    THEN '[]'::jsonb
+                    ELSE alergias_conocidas::jsonb
+                END;
+            END IF;
+        END $$;
+        """,
+    ]
+
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # Ejecutamos la creación de la tabla
-        for command in commands:
-            cur.execute(command)
-        # Confirmamos los cambios en la BD
+
+        cur.execute(create_table)
         conn.commit()
+
+        for migration in migrations:
+            cur.execute(migration)
+        conn.commit()
+
+        for migration in conditional_migrations:
+            try:
+                cur.execute(migration)
+                conn.commit()
+            except (Exception, psycopg2.DatabaseError) as mig_error:
+                conn.rollback()
+                print(f"⚠️  No se pudo aplicar una migración (puede ser normal si ya se aplicó antes): {mig_error}")
+
         cur.close()
-        print("✅ Base de datos inicializada: Tabla 'pacientes' lista.")
+        print("✅ Base de datos inicializada y migrada: Tabla 'pacientes' lista.")
     except (Exception, psycopg2.DatabaseError) as error:
         print(f"❌ Error al inicializar la base de datos: {error}")
     finally:
