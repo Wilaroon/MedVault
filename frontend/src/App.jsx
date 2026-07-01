@@ -6,6 +6,9 @@ import Header from './components/Header.jsx';
 import Dashboard from './components/Dashboard.jsx';
 import Pacientes from './components/Pacientes.jsx';
 import PatientDetail from './components/PatientDetail.jsx';
+import Consultas from './components/Consultas.jsx';
+import Alertas from './components/Alertas.jsx';
+import Auditoria from './components/Auditoria.jsx';
 import NewPatientModal from './components/NewPatientModal.jsx';
 import Toast from './components/Toast.jsx';
 
@@ -90,12 +93,9 @@ export default function App() {
           />
         )}
         {screen === 'detail' && <PatientDetail patient={selectedPatient} onBack={backToList} />}
-        {(screen === 'consultas' || screen === 'alertas' || screen === 'auditoria') && (
-          <div style={{ padding: '60px 34px', textAlign: 'center', color: '#94A3B8' }}>
-            <div style={{ fontSize: '15px', fontWeight: 600 }}>Sección en construcción</div>
-            <div style={{ fontSize: '13px', marginTop: '6px' }}>Este módulo estará disponible próximamente.</div>
-          </div>
-        )}
+        {screen === 'consultas' && <Consultas patients={patients} />}
+        {screen === 'alertas' && <Alertas patients={patients} onOpenPatient={openPatient} />}
+        {screen === 'auditoria' && <Auditoria patients={patients} />}
       </main>
 
       <NewPatientModal
