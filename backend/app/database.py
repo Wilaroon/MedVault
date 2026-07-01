@@ -49,6 +49,18 @@ def init_db():
         );
     """
 
+    create_usuarios = """
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id SERIAL PRIMARY KEY,
+            cedula VARCHAR(50) UNIQUE NOT NULL,
+            nombre VARCHAR(150) NOT NULL,
+            rol VARCHAR(20) NOT NULL CHECK (rol IN ('admin', 'medico', 'enfermeria')),
+            password_hash VARCHAR(255) NOT NULL,
+            activo BOOLEAN NOT NULL DEFAULT TRUE,
+            fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """
+
     # Migraciones para bases de datos que ya existían con el
     # esquema viejo. Cada una es segura de re-ejecutar (idempotente).
     migrations = [
@@ -104,6 +116,7 @@ def init_db():
         cur = conn.cursor()
 
         cur.execute(create_table)
+        cur.execute(create_usuarios)
         conn.commit()
 
         for migration in migrations:

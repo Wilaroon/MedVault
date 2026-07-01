@@ -1,6 +1,6 @@
-from pydantic import BaseModel, EmailStr
-from typing import Optional, List, Dict
-from datetime import date
+from pydantic import BaseModel, EmailStr, Field
+from typing import Optional, List, Dict, Literal
+from datetime import date, datetime
 
 
 class AlergiaSchema(BaseModel):
@@ -69,3 +69,43 @@ class PacienteResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ============================================================
+# Usuarios y autenticación
+# ============================================================
+
+RolUsuario = Literal["admin", "medico", "enfermeria"]
+
+
+class UsuarioCreate(BaseModel):
+    cedula: str = Field(min_length=3, max_length=50)
+    nombre: str = Field(min_length=2, max_length=150)
+    rol: RolUsuario
+    password: str = Field(min_length=6, max_length=200)
+
+
+class UsuarioUpdate(BaseModel):
+    nombre: Optional[str] = Field(default=None, min_length=2, max_length=150)
+    rol: Optional[RolUsuario] = None
+    activo: Optional[bool] = None
+    password: Optional[str] = Field(default=None, min_length=6, max_length=200)
+
+
+class UsuarioResponse(BaseModel):
+    id: int
+    cedula: str
+    nombre: str
+    rol: RolUsuario
+    activo: bool
+    fecha_creacion: Optional[datetime] = None
+
+
+class LoginRequest(BaseModel):
+    cedula: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    token: str
+    usuario: UsuarioResponse
