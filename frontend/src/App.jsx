@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { api } from './api.js';
+import { api, getToken, setToken } from './api.js';
 import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Header from './components/Header.jsx';
@@ -9,6 +9,7 @@ import PatientDetail from './components/PatientDetail.jsx';
 import Consultas from './components/Consultas.jsx';
 import Alertas from './components/Alertas.jsx';
 import Auditoria from './components/Auditoria.jsx';
+import Usuarios from './components/Usuarios.jsx';
 import NewPatientModal from './components/NewPatientModal.jsx';
 import Toast from './components/Toast.jsx';
 
@@ -18,11 +19,15 @@ const HEADERS = {
   consultas: { title: 'Consultas', subtitle: 'Consultas médicas' },
   alertas: { title: 'Alertas', subtitle: 'Alertas activas del sistema' },
   auditoria: { title: 'Auditoría', subtitle: 'Registro de accesos y cambios' },
+  usuarios: { title: 'Usuarios', subtitle: 'Gestión de cuentas y permisos' },
   detail: { title: 'Detalle del paciente', subtitle: 'Historia clínica completa' }
 };
 
+const ADMIN_SCREENS = new Set(['consultas', 'alertas', 'auditoria', 'usuarios']);
+
 export default function App() {
   const [user, setUser] = useState(null);
+  const [restoring, setRestoring] = useState(true);
   const [screen, setScreen] = useState('dashboard');
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -49,9 +54,58 @@ export default function App() {
     }
   }, [showToast]);
 
+  const handleLogout = useCallback(async () => {
+    try { await api.logout(); } catch (e) { /* ignore */ }
+    setToken(null);
+    setUser(null);
+    setScreen('dashboard');
+    setPatients([]);
+  }, []);
+
+  // Restaurar sesión al montar
+  useEffect(() => {
+    (async () => {
+      if (!getToken()) { setRestoring(false); return; }
+      try {
+        const me = await api.me();
+        setUser(me);
+      } catch {
+        setToken(null);
+      } finally {
+        setRestoring(false);
+      }
+    })();
+  }, []);
+
+  // Cerrar sesión si el backend responde 401
+  useEffect(() => {
+    const onUnauth = () => { setUser(null); setScreen('dashboard'); };
+    window.addEventListener('medvault:unauthorized', onUnauth);
+    return () => window.removeEventListener('medvault:unauthorized', onUnauth);
+  }, []);
+
   useEffect(() => {
     if (user) loadPatients();
   }, [user, loadPatients]);
+
+  // Si el usuario cambia de rol o el screen actual ya no es visible, resetear
+  useEffect(() => {
+    if (!user) return;
+    if (user.rol !== 'admin' && ADMIN_SCREENS.has(screen)) {
+      setScreen('dashboard');
+    }
+  }, [user, screen]);
+
+  if (restoring) {
+    return (
+      <div style={{
+        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: '#94A3B8', fontSize: '13px'
+      }}>
+        Restaurando sesión…
+      </div>
+    );
+  }
 
   if (!user) return <Login onLogin={setUser} />;
 
@@ -60,8 +114,9 @@ export default function App() {
 
   const headerInfo = HEADERS[screen] || HEADERS.dashboard;
   const selectedPatient = patients.find((p) => p.id === selectedId);
+  const isAdmin = user.rol === 'admin';
 
-  const newBtn = (screen === 'pacientes' || screen === 'dashboard') && (
+  const newBtn = isAdmin && (screen === 'pacientes' || screen === 'dashboard') && (
     <button
       onClick={() => setModalOpen(true)}
       style={{
@@ -77,7 +132,7 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: '#F4F7F8' }}>
-      <Sidebar screen={screen} onNavigate={setScreen} user={user} />
+      <Sidebar screen={screen} onNavigate={setScreen} user={user} onLogout={handleLogout} />
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <Header title={headerInfo.title} subtitle={headerInfo.subtitle} action={newBtn} />
@@ -88,22 +143,26 @@ export default function App() {
             patients={patients}
             loading={loading}
             onOpenPatient={openPatient}
-            onNewPatient={() => setModalOpen(true)}
+            onNewPatient={isAdmin ? () => setModalOpen(true) : null}
             onRefresh={loadPatients}
+            canCreate={isAdmin}
           />
         )}
         {screen === 'detail' && <PatientDetail patient={selectedPatient} onBack={backToList} />}
-        {screen === 'consultas' && <Consultas patients={patients} />}
-        {screen === 'alertas' && <Alertas patients={patients} onOpenPatient={openPatient} />}
-        {screen === 'auditoria' && <Auditoria patients={patients} />}
+        {screen === 'consultas' && isAdmin && <Consultas patients={patients} />}
+        {screen === 'alertas' && isAdmin && <Alertas patients={patients} onOpenPatient={openPatient} />}
+        {screen === 'auditoria' && isAdmin && <Auditoria patients={patients} />}
+        {screen === 'usuarios' && isAdmin && <Usuarios currentUser={user} onToast={showToast} />}
       </main>
 
-      <NewPatientModal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        onCreated={loadPatients}
-        onToast={showToast}
-      />
+      {isAdmin && (
+        <NewPatientModal
+          open={modalOpen}
+          onClose={() => setModalOpen(false)}
+          onCreated={loadPatients}
+          onToast={showToast}
+        />
+      )}
 
       <Toast message={toast?.message} kind={toast?.kind} />
     </div>

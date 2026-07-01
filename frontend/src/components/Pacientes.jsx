@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 
-export default function Pacientes({ patients, loading, onOpenPatient, onNewPatient, onRefresh }) {
+export default function Pacientes({ patients, loading, onOpenPatient, onNewPatient, onRefresh, canCreate = true }) {
   const [q, setQ] = useState('');
   const [onlyAllergic, setOnlyAllergic] = useState(false);
 
@@ -63,22 +63,24 @@ export default function Pacientes({ patients, loading, onOpenPatient, onNewPatie
         >
           ⟳
         </button>
-        <button
-          onClick={onNewPatient}
-          style={{
-            padding: '11px 18px',
-            border: 'none',
-            borderRadius: '11px',
-            background: 'linear-gradient(90deg,#0D7377,#00C9A7)',
-            color: '#fff',
-            fontSize: '13.5px',
-            fontWeight: 700,
-            cursor: 'pointer',
-            boxShadow: '0 8px 18px -6px rgba(0,201,167,0.5)'
-          }}
-        >
-          + Nuevo paciente
-        </button>
+        {canCreate && (
+          <button
+            onClick={onNewPatient}
+            style={{
+              padding: '11px 18px',
+              border: 'none',
+              borderRadius: '11px',
+              background: 'linear-gradient(90deg,#0D7377,#00C9A7)',
+              color: '#fff',
+              fontSize: '13.5px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 8px 18px -6px rgba(0,201,167,0.5)'
+            }}
+          >
+            + Nuevo paciente
+          </button>
+        )}
       </div>
 
       {loading && (

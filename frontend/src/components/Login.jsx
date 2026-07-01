@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { api, setToken } from '../api.js';
 
 const wrapStyle = {
   minHeight: '100vh',
@@ -65,29 +66,43 @@ const inputStyle = {
   marginBottom: '16px'
 };
 
-const buttonStyle = {
+const buttonStyle = (submitting) => ({
   width: '100%',
   padding: '13px',
   border: 'none',
   borderRadius: '11px',
-  background: 'linear-gradient(90deg, #0D7377, #00C9A7)',
+  background: submitting ? '#94A3B8' : 'linear-gradient(90deg, #0D7377, #00C9A7)',
   color: '#fff',
   fontSize: '14px',
   fontWeight: 700,
-  cursor: 'pointer',
-  boxShadow: '0 10px 22px -6px rgba(0,201,167,0.5)',
+  cursor: submitting ? 'not-allowed' : 'pointer',
+  boxShadow: submitting ? 'none' : '0 10px 22px -6px rgba(0,201,167,0.5)',
   transition: 'all .2s ease',
   marginTop: '6px'
-};
+});
 
 export default function Login({ onLogin }) {
   const [cedula, setCedula] = useState('');
   const [password, setPassword] = useState('');
-  const [rol, setRol] = useState('Médico');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    onLogin({ cedula: cedula || '8-888-8888', rol });
+    if (!cedula.trim() || !password) {
+      setError('Ingresa cédula y contraseña.');
+      return;
+    }
+    setError('');
+    setSubmitting(true);
+    try {
+      const res = await api.login(cedula.trim(), password);
+      setToken(res.token);
+      onLogin(res.usuario);
+    } catch (err) {
+      setError(err.message || 'No se pudo iniciar sesión');
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -117,6 +132,7 @@ export default function Login({ onLogin }) {
           placeholder="8-888-8888"
           value={cedula}
           onChange={(e) => setCedula(e.target.value)}
+          autoFocus
         />
 
         <label style={labelStyle}>Contraseña</label>
@@ -128,18 +144,19 @@ export default function Login({ onLogin }) {
           onChange={(e) => setPassword(e.target.value)}
         />
 
-        <label style={labelStyle}>Rol</label>
-        <select
-          style={{ ...inputStyle, cursor: 'pointer' }}
-          value={rol}
-          onChange={(e) => setRol(e.target.value)}
-        >
-          <option>Médico</option>
-          <option>Enfermería</option>
-          <option>Administrador</option>
-        </select>
+        {error && (
+          <div style={{
+            background: '#FEE2E2', color: '#991B1B',
+            padding: '10px 14px', borderRadius: '10px',
+            fontSize: '12.5px', fontWeight: 600, marginBottom: '14px'
+          }}>
+            {error}
+          </div>
+        )}
 
-        <button type="submit" style={buttonStyle}>Iniciar Sesión</button>
+        <button type="submit" style={buttonStyle(submitting)} disabled={submitting}>
+          {submitting ? 'Entrando…' : 'Iniciar Sesión'}
+        </button>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginTop: '20px', color: '#94A3B8', fontSize: '11.5px' }}>
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2">
