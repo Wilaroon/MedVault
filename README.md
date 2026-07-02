@@ -81,6 +81,34 @@ Abre **http://localhost:5500** en el navegador.
 
 ---
 
+## Credenciales de prueba
+
+> ⚠️ Estas credenciales son para desarrollo / proyecto académico. **No usar en producción.**
+
+El sistema tiene 3 roles: **admin** (acceso total), **médico** y **enfermería** (solo Dashboard y Pacientes en lectura).
+
+| Rol | Cédula | Contraseña | Nombre |
+|---|---|---|---|
+| **admin** | `8-888-8888` | `admin123` | Administrador MedVault |
+| admin | `2-100-5678` | `admin2024` | Adm. Carlos Vega |
+| médico | `9-111-2222` | `medico123` | Dr. Juan Perez |
+| médico | `8-555-9999` | `medico2024` | Dra. Lucia Fernandez |
+| enfermería | `3-720-1234` | `enfermeria123` | Enf. Maria Torres |
+
+El primer admin (`8-888-8888`) se **crea automáticamente** en el primer arranque si la tabla `usuarios` está vacía. Los demás se crean al ejecutar la semilla de datos (ver siguiente sección) o manualmente desde la pantalla **Usuarios** (accesible solo por admins).
+
+### Semilla de datos de prueba
+
+El repositorio no incluye un script de seed persistido, pero si necesitas repoblar la BD con los 15 pacientes y 5 usuarios de ejemplo, puedes:
+
+1. Entrar como admin (`8-888-8888` / `admin123`)
+2. Ir a **Usuarios** → crear los otros usuarios manualmente
+3. Ir a **Pacientes** → crear pacientes con el botón **+ Nuevo paciente**
+
+Alternativamente, pídele al equipo el script `seed.py` que se usó durante el desarrollo.
+
+---
+
 ## Comandos disponibles
 
 ### Frontend (`cd frontend`)
