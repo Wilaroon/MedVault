@@ -275,7 +275,11 @@ npm install
 - PostgreSQL 15 (Alpine)
 - Migraciones idempotentes en `database.py`
 - Datos persistidos en volumen Docker `postgres_data`
+  
 
-👥 Autores y ContribuciónEste proyecto fue desarrollado por:Anderson SantosWilaroonPerfil de GitHubPerfil de GitHubFrontend / UI Design / BackendBackend / Base de Datos
+## 👥 Autores y Contribución
 
-
+| Anderson Santos | Wilaroon |
+| :---: | :---: |
+| [Perfil de GitHub](https://github.com/AnderSantos-31) | [Perfil de GitHub](https://github.com/Wilaroon) |
+| Frontend / UI Design / Backend | Backend / Base de Datos |
