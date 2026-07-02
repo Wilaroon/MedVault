@@ -1,17 +1,30 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg2.extras import RealDictCursor, Json
 
-import json
-from app.schemas import PacienteCreate
+from app.schemas import (
+    PacienteCreate,
+    UsuarioCreate,
+    UsuarioUpdate,
+    UsuarioResponse,
+    LoginRequest,
+    LoginResponse,
+)
 from app.database import init_db, get_db_connection
 from app.utils import fila_a_paciente_response
+from app.auth import (
+    hash_password,
+    verify_password,
+    create_session,
+    destroy_session,
+    get_current_user,
+    require_admin,
+    seed_admin_if_empty,
+)
 
 
-# 1. Instanciamos FastAPI
-app = FastAPI(title="MedVault API", version="1.0")
+app = FastAPI(title="MedVault API", version="1.1")
 
-# 2. Configuración de CORS para conectar con tu Frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,26 +34,200 @@ app.add_middleware(
 )
 
 
-# 3. Inicializar la base de datos al arrancar
 @app.on_event("startup")
 def startup_event():
     init_db()
+    seed_admin_if_empty()
 
 
 @app.get("/")
 def read_root():
-    return {"message": "¡MedVault API operando con tus esquemas originales!"}
+    return {"message": "¡MedVault API operando con autenticación!"}
 
+
+# ============================================================
+# Autenticación
+# ============================================================
+
+@app.post("/api/login", response_model=LoginResponse)
+def login(payload: LoginRequest):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            "SELECT id, cedula, nombre, rol, password_hash, activo, fecha_creacion "
+            "FROM usuarios WHERE cedula = %s;",
+            (payload.cedula,),
+        )
+        row = cur.fetchone()
+        cur.close()
+
+        if not row:
+            raise HTTPException(status_code=401, detail="Cédula o contraseña incorrecta")
+        if not row["activo"]:
+            raise HTTPException(status_code=403, detail="Usuario inactivo. Contacte al administrador.")
+        if not verify_password(payload.password, row["password_hash"]):
+            raise HTTPException(status_code=401, detail="Cédula o contraseña incorrecta")
+
+        usuario = {
+            "id": row["id"],
+            "cedula": row["cedula"],
+            "nombre": row["nombre"],
+            "rol": row["rol"],
+            "activo": row["activo"],
+            "fecha_creacion": row["fecha_creacion"],
+        }
+        token = create_session(usuario)
+        return {"token": token, "usuario": usuario}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error en login: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post("/api/logout")
+def logout(current=Depends(get_current_user)):
+    destroy_session(current["token"])
+    return {"status": "ok"}
+
+
+@app.get("/api/me", response_model=UsuarioResponse)
+def me(current=Depends(get_current_user)):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            "SELECT id, cedula, nombre, rol, activo, fecha_creacion "
+            "FROM usuarios WHERE id = %s;",
+            (current["usuario_id"],),
+        )
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        return dict(row)
+    finally:
+        if conn:
+            conn.close()
+
+
+# ============================================================
+# Gestión de usuarios (solo admin)
+# ============================================================
+
+@app.get("/api/usuarios", response_model=list[UsuarioResponse])
+def listar_usuarios(_admin=Depends(require_admin)):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            "SELECT id, cedula, nombre, rol, activo, fecha_creacion "
+            "FROM usuarios ORDER BY fecha_creacion DESC;"
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return [dict(r) for r in rows]
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post("/api/usuarios", response_model=UsuarioResponse, status_code=201)
+def crear_usuario(payload: UsuarioCreate, _admin=Depends(require_admin)):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        pw_hash = hash_password(payload.password)
+        try:
+            cur.execute(
+                """
+                INSERT INTO usuarios (cedula, nombre, rol, password_hash, activo)
+                VALUES (%s, %s, %s, %s, TRUE)
+                RETURNING id, cedula, nombre, rol, activo, fecha_creacion;
+                """,
+                (payload.cedula, payload.nombre, payload.rol, pw_hash),
+            )
+        except Exception as e:
+            conn.rollback()
+            if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+                raise HTTPException(status_code=409, detail=f"Ya existe un usuario con cédula {payload.cedula}")
+            raise
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+        return dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creando usuario: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.patch("/api/usuarios/{usuario_id}", response_model=UsuarioResponse)
+def actualizar_usuario(usuario_id: int, payload: UsuarioUpdate, _admin=Depends(require_admin)):
+    updates = []
+    values = []
+    if payload.nombre is not None:
+        updates.append("nombre = %s")
+        values.append(payload.nombre)
+    if payload.rol is not None:
+        updates.append("rol = %s")
+        values.append(payload.rol)
+    if payload.activo is not None:
+        updates.append("activo = %s")
+        values.append(payload.activo)
+    if payload.password is not None:
+        updates.append("password_hash = %s")
+        values.append(hash_password(payload.password))
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nada que actualizar")
+
+    values.append(usuario_id)
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            f"UPDATE usuarios SET {', '.join(updates)} WHERE id = %s "
+            f"RETURNING id, cedula, nombre, rol, activo, fecha_creacion;",
+            tuple(values),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        conn.commit()
+        cur.close()
+        return dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error actualizando usuario: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+# ============================================================
+# Pacientes
+# ============================================================
 
 @app.post("/api/pacientes", status_code=201)
-def crear_paciente(paciente: PacienteCreate):
+def crear_paciente(paciente: PacienteCreate, _user=Depends(require_admin)):
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Query con las columnas reales de Postgres, incluyendo
-        # email y contacto_emergencia (ahora JSONB)
         query = """
             INSERT INTO pacientes (
                 nombre_completo, cedula_id, fecha_nacimiento, genero,
@@ -50,8 +237,6 @@ def crear_paciente(paciente: PacienteCreate):
             RETURNING id;
         """
 
-        # Json(...) le dice a psycopg2 que serialice el dict/list
-        # directamente como JSONB, sin pasar por json.dumps manual.
         contacto_data = (
             paciente.contacto_emergencia.model_dump()
             if paciente.contacto_emergencia else None
@@ -95,9 +280,8 @@ def crear_paciente(paciente: PacienteCreate):
             conn.close()
 
 
-# 🔍 ENDPOINT PARA EXTRAER (formato dashboard)
 @app.get("/api/pacientes")
-def obtener_pacientes():
+def obtener_pacientes(_user=Depends(get_current_user)):
     conn = None
     try:
         conn = get_db_connection()
@@ -108,8 +292,6 @@ def obtener_pacientes():
 
         cur.close()
 
-        # Transformamos cada fila cruda de la BD al objeto que
-        # espera el frontend (name, initials, age, diag, etc.)
         pacientes = [fila_a_paciente_response(dict(row)) for row in filas]
         return pacientes
 
